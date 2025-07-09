@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>BeQuick!</title>
+  <style>
+    body, html {
+      margin: 0; padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #000;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      color: #fff;
+    }
+
+    /* Container per mantenere 9:16 e centratura */
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      max-width: 450px; /* limite larghezza per telefoni più grandi */
+      max-height: calc(450px * (16/9)); /* calcolo altezza max per 9:16 */
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      border-radius: 16px;
+      box-shadow: 0 0 30px rgba(255, 0, 0, 0.6);
+    }
+
+    video#preview {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      aspect-ratio: 9 / 16;
+      border-radius: 16px;
+      border: 2px solid #ff3b30;
+      box-shadow: 0 0 15px rgba(255, 59, 48, 0.8);
+      background: #111;
+    }
+
+    button#recordBtn {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80px;
+      height: 80px;
+      background-color: #ff3b30;
+      border: 4px solid #fff;
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow:
+        0 0 15px rgba(255, 59, 48, 0.8),
+        inset 0 0 8px rgba(255, 255, 255, 0.6);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.2em;
+      user-select: none;
+      color: white;
+      z-index: 10;
+    }
+
+    button#recordBtn:active {
+      transform: translateX(-50%) scale(0.85);
+      box-shadow:
+        0 0 10px rgba(255, 59, 48, 0.6),
+        inset 0 0 6px rgba(255, 255, 255, 0.8);
+    }
+
+    button#recordBtn:disabled {
+      background-color: #7a0f0b;
+      border-color: #aaa;
+      box-shadow: none;
+      cursor: default;
+      color: #ddd;
+    }
+
+    form {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="preview" autoplay muted playsinline></video>
+    <button id="recordBtn" aria-label="Registra video">🎬</button>
+  </div>
+
+  <form id="uploadForm" action="https://api.web3forms.com/submit" method="POST" enctype="multipart/form-data" novalidate>
+    <input type="hidden" name="access_key" value="24f585ca-af04-4e38-abc0-a4759e8f9737" />
+    <input type="file" name="video" id="videoInput" hidden />
+    <button type="submit">Invia Video</button>
+  </form>
+
+  <script>
+    const video = document.getElementById('preview');
+    const recordBtn = document.getElementById('recordBtn');
+    const uploadForm = document.getElementById('uploadForm');
+    const videoInput = document.getElementById('videoInput');
+
+    let mediaRecorder, recordedChunks = [];
+    let stream;
+
+    async function startCameraWithTorch() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1080 },
+            height: { ideal: 1920 },
+            aspectRatio: 9/16,
+            advanced: [{ torch: true }]
+          },
+          audio: true
+        });
+
+        video.srcObject = stream;
+
+        const track = stream.getVideoTracks()[0];
+        const imageCapture = new ImageCapture(track);
+        const capabilities = await imageCapture.getPhotoCapabilities();
+
+        if (capabilities.torch) {
+          await track.applyConstraints({ advanced: [{ torch: true }] });
+          console.log("Torch attivata");
+        } else {
+          console.log("Torch non supportata");
+        }
+
+        mediaRecorder = new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = e => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: 'video/webm' });
+          const file = new File([blob], 'video.webm', { type: 'video/webm' });
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          videoInput.files = dataTransfer.files;
+          recordedChunks = [];
+
+          uploadForm.submit();
+        };
+
+      } catch (err) {
+        console.error("Errore nella camera o nel torch:", err);
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        video.srcObject = stream;
+        mediaRecorder = new MediaRecorder(stream);
+
+        mediaRecorder.ondataavailable = e => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: 'video/webm' });
+          const file = new File([blob], 'video.webm', { type: 'video/webm' });
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          videoInput.files = dataTransfer.files;
+          recordedChunks = [];
+
+          uploadForm.submit();
+        };
+      }
+    }
+
+    recordBtn.onclick = () => {
+      if (!mediaRecorder) {
+        alert("Camera non pronta, riprova.");
+        return;
+      }
+      recordBtn.disabled = true;
+      mediaRecorder.start();
+      setTimeout(() => {
+        mediaRecorder.stop();
+        recordBtn.disabled = false;
+      }, 2000);
+    };
+
+    startCameraWithTorch();
+  </script>
+</body>
+</html>
+

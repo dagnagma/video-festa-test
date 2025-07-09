@@ -13,21 +13,31 @@
       overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
       display: flex;
-      justify-content: center;
+      flex-direction: column;
       align-items: center;
-      position: relative;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
       color: #fff;
+      user-select: none;
     }
 
-    /* Container per mantenere 9:16 e centratura */
+    h1 {
+      margin: 1em 0 0.3em 0;
+      font-weight: 700;
+      font-size: 2.8em;
+      color: #fff;
+      text-shadow:
+        0 0 10px rgba(255, 59, 48, 0.7),
+        0 0 20px rgba(255, 59, 48, 0.6);
+      letter-spacing: 0.05em;
+    }
+
     #container {
       position: relative;
       width: 100vw;
-      height: 100vh;
-      max-width: 450px; /* limite larghezza per telefoni più grandi */
-      max-height: calc(450px * (16/9)); /* calcolo altezza max per 9:16 */
+      height: calc(100vh - 5.5em);
+      max-width: 450px;
+      max-height: calc(450px * (16/9));
       background: #000;
       display: flex;
       justify-content: center;
@@ -35,6 +45,7 @@
       overflow: hidden;
       border-radius: 16px;
       box-shadow: 0 0 30px rgba(255, 0, 0, 0.6);
+      flex-shrink: 0;
     }
 
     video#preview {
@@ -87,15 +98,42 @@
       color: #ddd;
     }
 
+    /* Pulsante per switch camera */
+    button#switchCamBtn {
+      position: absolute;
+      bottom: 30px;
+      left: 15px;
+      width: 50px;
+      height: 50px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 50%;
+      border: 2px solid #ff3b30;
+      color: #ff3b30;
+      font-size: 1.8em;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      user-select: none;
+      transition: background 0.3s ease;
+      z-index: 15;
+    }
+    button#switchCamBtn:hover {
+      background: rgba(255, 59, 48, 0.3);
+    }
+
     form {
       display: none;
     }
   </style>
 </head>
 <body>
+  <h1>BeQuick!</h1>
+
   <div id="container">
     <video id="preview" autoplay muted playsinline></video>
     <button id="recordBtn" aria-label="Registra video">🎬</button>
+    <button id="switchCamBtn" aria-label="Cambia videocamera" title="Cambia videocamera">🔄</button>
   </div>
 
   <form id="uploadForm" action="https://api.web3forms.com/submit" method="POST" enctype="multipart/form-data" novalidate>
@@ -107,39 +145,50 @@
   <script>
     const video = document.getElementById('preview');
     const recordBtn = document.getElementById('recordBtn');
+    const switchCamBtn = document.getElementById('switchCamBtn');
     const uploadForm = document.getElementById('uploadForm');
     const videoInput = document.getElementById('videoInput');
 
     let mediaRecorder, recordedChunks = [];
     let stream;
+    let currentFacingMode = 'environment'; // start with rear camera
 
-    async function startCameraWithTorch() {
+    async function startCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "environment",
+            facingMode: currentFacingMode,
             width: { ideal: 1080 },
             height: { ideal: 1920 },
-            aspectRatio: 9/16,
-            advanced: [{ torch: true }]
+            aspectRatio: 9 / 16,
           },
           audio: true
         });
-
         video.srcObject = stream;
 
-        const track = stream.getVideoTracks()[0];
-        const imageCapture = new ImageCapture(track);
-        const capabilities = await imageCapture.getPhotoCapabilities();
+        // Prova ad attivare il torch se possibile (solo su rear)
+        if (currentFacingMode === 'environment') {
+          const track = stream.getVideoTracks()[0];
+          const capabilities = track.getCapabilities();
 
-        if (capabilities.torch) {
-          await track.applyConstraints({ advanced: [{ torch: true }] });
-          console.log("Torch attivata");
-        } else {
-          console.log("Torch non supportata");
+          if (capabilities.torch) {
+            try {
+              await track.applyConstraints({ advanced: [{ torch: true }] });
+              console.log("Torch attivata");
+            } catch (e) {
+              console.log("Torch non si può attivare:", e);
+            }
+          } else {
+            console.log("Torch non supportata");
+          }
         }
 
         mediaRecorder = new MediaRecorder(stream);
+        recordedChunks = [];
 
         mediaRecorder.ondataavailable = e => {
           if (e.data.size > 0) recordedChunks.push(e.data);
@@ -157,25 +206,8 @@
         };
 
       } catch (err) {
-        console.error("Errore nella camera o nel torch:", err);
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        video.srcObject = stream;
-        mediaRecorder = new MediaRecorder(stream);
-
-        mediaRecorder.ondataavailable = e => {
-          if (e.data.size > 0) recordedChunks.push(e.data);
-        };
-
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(recordedChunks, { type: 'video/webm' });
-          const file = new File([blob], 'video.webm', { type: 'video/webm' });
-          const dataTransfer = new DataTransfer();
-          dataTransfer.items.add(file);
-          videoInput.files = dataTransfer.files;
-          recordedChunks = [];
-
-          uploadForm.submit();
-        };
+        console.error("Errore camera:", err);
+        alert("Errore nell'accesso alla videocamera. Controlla permessi e riprova.");
       }
     }
 
@@ -192,8 +224,12 @@
       }, 2000);
     };
 
-    startCameraWithTorch();
+    switchCamBtn.onclick = () => {
+      currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+      startCamera();
+    };
+
+    startCamera();
   </script>
 </body>
 </html>
-
